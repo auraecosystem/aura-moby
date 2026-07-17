@@ -3,169 +3,75 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
+	"os_signal"
 	"syscall"
 	"time"
 )
 
-var (
-	ErrConfigNotFound = errors.New("config not found")
-	ErrDatabaseOffline = errors.New("database offline")
-)
-
-type Config struct {
-	Address   string
-	DB        string
-	ClientURL string
-}
-
-type DB struct{}
-
-func (d *DB) Close() error {
-	log.Println("Database closed")
-	return nil
-}
-
-type Client struct {
-	URL string
-}
-
-func (c *Client) DoSomething(ctx context.Context) error {
-	log.Printf("Connected to client: %s\n", c.URL)
-	return nil
-}
-
+// User represents a sample data payload
 type User struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	defer stop()
-
-	if err := run(ctx); err != nil {
-		log.Printf("Fatal: %v", err)
-		os.Exit(exitCode(err))
-	}
-}
-
-func run(ctx context.Context) error {
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	db, err := openDB(cfg.DB)
-	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
-	}
-	defer db.Close()
-
-	client := NewClient(cfg.ClientURL)
-
-	if err := client.DoSomething(ctx); err != nil {
-		return fmt.Errorf("client error: %w", err)
-	}
-
-	return startHTTPServer(ctx, cfg)
-}
-
-func loadConfig() (*Config, error) {
-
-	return &Config{
-		Address:   ":8080",
-		DB:        "localhost",
-		ClientURL: "https://api.example.com",
-	}, nil
-}
-
-func openDB(addr string) (*DB, error) {
-
-	if addr == "" {
-		return nil, ErrDatabaseOffline
-	}
-
-	log.Println("Database connected")
-
-	return &DB{}, nil
-}
-
-func NewClient(url string) *Client {
-	return &Client{
-		URL: url,
-	}
-}
-
-func startHTTPServer(ctx context.Context, cfg *Config) error {
-
+	// 1. Create a secure request multiplexer (router)
 	mux := http.NewServeMux()
 
+	// 2. Define routes
 	mux.HandleFunc("GET /", handleHome)
 	mux.HandleFunc("GET /api/user", handleGetUser)
 
+	// 3. Configure server timeouts for production safety
 	server := &http.Server{
-		Addr:         cfg.Address,
+		Addr:         ":8080",
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
-
+	// 4. Run the server in a separate goroutine to allow graceful shutdown
 	go func() {
-		log.Printf("Server listening on http://localhost%s", cfg.Address)
-
-		err := server.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			errCh <- err
-			return
+		log.Printf("Server starting on HTTP://localhost%s\n", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
 		}
-
-		errCh <- nil
 	}()
 
-	select {
+	// 5. Channel to catch OS termination signals
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
-	case <-ctx.Done():
+	// Block until a signal is received
+	<-shutdownChan
+	log.Println("Shutdown signal received. Closing connections...")
 
-		log.Println("Shutdown signal received")
+	// 6. Context with a timeout to force shutdown if active requests hang
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-		shutdownCtx, cancel := context.WithTimeout(
-			context.Background(),
-			15*time.Second,
-		)
-		defer cancel()
-
-		return server.Shutdown(shutdownCtx)
-
-	case err := <-errCh:
-
-		return err
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	log.Println("Server gracefully stopped.")
 }
 
+// handleHome writes a plain text response
 func handleHome(w http.ResponseWriter, r *http.Request) {
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-
 	fmt.Fprintln(w, "Welcome to the home endpoint!")
 }
 
+// handleGetUser parses query parameters and returns a JSON object
 func handleGetUser(w http.ResponseWriter, r *http.Request) {
-
+	// Parse query parameter (e.g., /api/user?name=Alice)
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		name = "Guest"
@@ -176,28 +82,10 @@ func handleGetUser(w http.ResponseWriter, r *http.Request) {
 		Name: name,
 	}
 
+	// Write JSON response
 	w.Header().Set("Content-Type", "application/json")
-
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(user); err != nil {
-		http.Error(
-			w,
-			"Internal Server Error",
-			http.StatusInternalServerError,
-		)
-	}
-}
-
-func exitCode(err error) int {
-
-	switch {
-
-	case errors.Is(err, ErrConfigNotFound):
-		return 2
-
-	case errors.Is(err, ErrDatabaseOffline):
-		return 3
-
-	default:
-		return 1
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
