@@ -29,7 +29,7 @@ This massive footprint points to several specific structural engineering goals:
 
 
 
-```xlsl
+```bash
                     +-----------------------+
                     | CLI / API Clients     |
                     +-----------+-----------+
@@ -91,3 +91,12 @@ Aura Moby
 │   ├── optimizer/
 │   └── telemetry/
 └── cli/
+
+
+```
+```bash
+moby/doc/
+├── ai.md          # Algorithmic parameter definitions
+├── security.md    # Low-overhead sandbox isolation protocols
+└── native.md      # Register layout parameters for the Assembly functions
+```
