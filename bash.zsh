@@ -4,6 +4,8 @@ docker buildx build \
   -t aura-ecosystem:fadk-s4x \
   --build-arg VERSION=V.FADK \
   --push .
+mkdir -p config/s4xv scripts src
+touch Dockerfile README.md .gitignore .env
 
 docker buildx create --name aura-builder --use
 docker buildx inspect --bootstrap
