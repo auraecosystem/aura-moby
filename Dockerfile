@@ -28,3 +28,17 @@ ENV SYSTEM_LAYER="S4X" \
     BUILD_CONFIG="ALL_ENV_PROD"
 
 ENTRYPOINT ["/aura-service"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    clang \
+    lld \
+    cmake \
+    ninja-build \
+    pkg-config \
+    nasm \
+    yasm \
+    golang-go \
+    git \
+    curl \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
